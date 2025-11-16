@@ -1,0 +1,62 @@
+# -------------------------------------------------------------------
+# 1. DEPENDENCIES AND BUILD OUTPUT
+# -------------------------------------------------------------------
+
+# Frontend (Root) Dependencies
+/node_modules
+
+# Backend Dependencies (CRITICAL for your nested 'Backend' folder)
+/Backend/node_modules
+
+# Frontend build output (Vite/React)
+/dist
+/dist-ssr
+/build
+/out
+
+# -------------------------------------------------------------------
+# 2. ENVIRONMENT VARIABLES & SECRETS (CRITICAL for security)
+# -------------------------------------------------------------------
+
+# Frontend environment variables (Vite-specific and local files)
+.env
+.env.local
+.env.*.local
+*.local
+
+# Backend environment variables (CRITICAL: Protects your MONGO_URI)
+/Backend/.env
+
+# -------------------------------------------------------------------
+# 3. LOGS, CACHE, AND DEBUGGING
+# -------------------------------------------------------------------
+
+# Your provided logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Other caches
+.npm
+.eslintcache
+.cache
+
+# -------------------------------------------------------------------
+# 4. EDITOR/OS FILES
+# -------------------------------------------------------------------
+
+# Editor directories and files
+.vscode/*
+# Uncomment the line below if you want to commit shared VS Code extensions
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
