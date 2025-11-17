@@ -19,7 +19,10 @@ const Manager = () => {
   const [copied, setCopied] = useState({ index: null, field: null });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [masterPassword, setMasterPassword] = useState("");
+  
+  // Session-based master password (stored in memory only)
+  const [sessionMasterPassword, setSessionMasterPassword] = useState("");
+  const [tempMasterPassword, setTempMasterPassword] = useState("");
   const [showMasterPasswordModal, setShowMasterPasswordModal] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
   const [decryptedPasswords, setDecryptedPasswords] = useState({});
@@ -45,24 +48,69 @@ const Manager = () => {
     setShowPass(!showPass);
   };
 
+  // Check if we have master password in session, if not request it
   const requestMasterPassword = (action) => {
-    setPendingAction(() => action);
-    setShowMasterPasswordModal(true);
+    if (sessionMasterPassword) {
+      // Already have it, execute immediately
+      action(sessionMasterPassword);
+    } else {
+      // Need to ask for it
+      setPendingAction(() => action);
+      setShowMasterPasswordModal(true);
+    }
   };
 
   const handleMasterPasswordSubmit = async () => {
-    if (!masterPassword) {
+    if (!tempMasterPassword) {
       toast.error("Please enter master password");
       return;
     }
 
+    // Store password in session immediately
+    setSessionMasterPassword(tempMasterPassword);
     setShowMasterPasswordModal(false);
 
+    // Execute pending action
     if (pendingAction) {
-      await pendingAction(masterPassword);
-      setMasterPassword("");
-      setPendingAction(null);
+      try {
+        setLoading(true);
+        await pendingAction(tempMasterPassword);
+        setPendingAction(null);
+        setTempMasterPassword("");
+        
+        toast.success("Master password verified!", {
+          position: "top-right",
+          autoClose: 2000,
+          theme: "dark",
+          transition: Bounce,
+        });
+      } catch (error) {
+        // Password was wrong - clear session
+        setSessionMasterPassword("");
+        setTempMasterPassword("");
+        setPendingAction(null);
+        
+        if (error.response?.status === 401) {
+          toast.error("Invalid master password. Please try again.", {
+            position: "top-right",
+            autoClose: 3000,
+            theme: "dark",
+            transition: Bounce,
+          });
+        } else {
+          toast.error(error.response?.data?.message || "Operation failed");
+        }
+      } finally {
+        setLoading(false);
+      }
     }
+  };
+
+  const handleLogout = () => {
+    // Clear session master password on logout
+    setSessionMasterPassword("");
+    setDecryptedPasswords({});
+    logout();
   };
 
   const savePassword = () => {
@@ -81,29 +129,22 @@ const Manager = () => {
     }
 
     requestMasterPassword(async (masterPass) => {
-      try {
-        setLoading(true);
-        await axios.post("/api/passwords", {
-          site: form.site,
-          username: form.username,
-          password: form.password,
-          masterPassword: masterPass,
-        });
+      const response = await axios.post("/api/passwords", {
+        site: form.site,
+        username: form.username,
+        password: form.password,
+        masterPassword: masterPass,
+      });
 
-        toast.success("Password Saved!", {
-          position: "top-right",
-          autoClose: 3000,
-          theme: "dark",
-          transition: Bounce,
-        });
+      toast.success("Password Saved!", {
+        position: "top-right",
+        autoClose: 3000,
+        theme: "dark",
+        transition: Bounce,
+      });
 
-        setform({ site: "", username: "", password: "" });
-        await fetchPasswords();
-      } catch (error) {
-        toast.error(error.response?.data?.message || "Failed to save password");
-      } finally {
-        setLoading(false);
-      }
+      setform({ site: "", username: "", password: "" });
+      await fetchPasswords();
     });
   };
 
@@ -111,37 +152,25 @@ const Manager = () => {
     const password = passwordArray.find((i) => i.id === id);
 
     requestMasterPassword(async (masterPass) => {
-      try {
-        setLoading(true);
+      const decryptResponse = await axios.post("/api/passwords/decrypt", {
+        passwordId: id,
+        masterPassword: masterPass,
+      });
 
-        // Decrypt the password first
-        const decryptResponse = await axios.post("/api/passwords/decrypt", {
-          passwordId: id,
-          masterPassword: masterPass,
-        });
+      setform({
+        site: password.site,
+        username: password.username,
+        password: decryptResponse.data.password,
+      });
 
-        setform({
-          site: password.site,
-          username: password.username,
-          password: decryptResponse.data.password,
-        });
+      setPasswordArray(passwordArray.filter((item) => item.id !== id));
 
-        // Remove from list
-        setPasswordArray(passwordArray.filter((item) => item.id !== id));
-
-        toast.info("Edit mode: Update and save", {
-          position: "top-right",
-          autoClose: 3000,
-          theme: "dark",
-          transition: Bounce,
-        });
-      } catch (error) {
-        toast.error(
-          error.response?.data?.message || "Failed to load password for editing"
-        );
-      } finally {
-        setLoading(false);
-      }
+      toast.info("Edit mode: Update and save", {
+        position: "top-right",
+        autoClose: 3000,
+        theme: "dark",
+        transition: Bounce,
+      });
     });
   };
 
@@ -175,9 +204,9 @@ const Manager = () => {
   };
 
   const copyText = async (text, index, field, id) => {
-    // If copying password, decrypt it first
     if (field === "password") {
       if (decryptedPasswords[id]) {
+        // Already decrypted, just copy
         navigator.clipboard.writeText(decryptedPasswords[id]);
         setCopied({ index, field });
         toast.success("Password Copied!", {
@@ -188,31 +217,30 @@ const Manager = () => {
         });
         setTimeout(() => setCopied({ index: null, field: null }), 2000);
       } else {
+        // Need to decrypt first
         requestMasterPassword(async (masterPass) => {
-          try {
-            const response = await axios.post("/api/passwords/decrypt", {
-              passwordId: id,
-              masterPassword: masterPass,
-            });
+          const response = await axios.post("/api/passwords/decrypt", {
+            passwordId: id,
+            masterPassword: masterPass,
+          });
 
-            const decryptedPassword = response.data.password;
-            setDecryptedPasswords({
-              ...decryptedPasswords,
-              [id]: decryptedPassword,
-            });
+          const decryptedPassword = response.data.password;
+          
+          // Cache the decrypted password
+          setDecryptedPasswords(prev => ({
+            ...prev,
+            [id]: decryptedPassword,
+          }));
 
-            navigator.clipboard.writeText(decryptedPassword);
-            setCopied({ index, field });
-            toast.success("Password Copied!", {
-              position: "top-right",
-              autoClose: 2000,
-              theme: "dark",
-              transition: Bounce,
-            });
-            setTimeout(() => setCopied({ index: null, field: null }), 2000);
-          } catch (error) {
-            toast.error("Failed to decrypt password");
-          }
+          navigator.clipboard.writeText(decryptedPassword);
+          setCopied({ index, field });
+          toast.success("Password Copied!", {
+            position: "top-right",
+            autoClose: 2000,
+            theme: "dark",
+            transition: Bounce,
+          });
+          setTimeout(() => setCopied({ index: null, field: null }), 2000);
         });
       }
     } else {
@@ -237,7 +265,7 @@ const Manager = () => {
         transition={Bounce}
       />
 
-      {/* Master Password Modal */}
+      {/* Master Password Modal - Only shows once per session */}
       {showMasterPasswordModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
@@ -245,12 +273,12 @@ const Manager = () => {
               Enter Master Password
             </h3>
             <p className="text-gray-600 mb-4">
-              Your master password is required to encrypt/decrypt data
+              Your master password is required for this session
             </p>
             <input
               type="password"
-              value={masterPassword}
-              onChange={(e) => setMasterPassword(e.target.value)}
+              value={tempMasterPassword}
+              onChange={(e) => setTempMasterPassword(e.target.value)}
               placeholder="Master Password"
               className="w-full px-4 py-3 rounded-lg border border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
               onKeyPress={(e) =>
@@ -261,21 +289,26 @@ const Manager = () => {
             <div className="flex gap-3">
               <button
                 onClick={handleMasterPasswordSubmit}
-                className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-all"
+                disabled={loading}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-all disabled:opacity-50"
               >
-                Confirm
+                {loading ? "Verifying..." : "Confirm"}
               </button>
               <button
                 onClick={() => {
                   setShowMasterPasswordModal(false);
-                  setMasterPassword("");
+                  setTempMasterPassword("");
                   setPendingAction(null);
                 }}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition-all"
+                disabled={loading}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
             </div>
+            <p className="text-xs text-gray-500 mt-3 text-center">
+              💡 You'll only need to enter this once per session
+            </p>
           </div>
         </div>
       )}
@@ -288,12 +321,19 @@ const Manager = () => {
               VaultX
               <span className="text-indigo-600">/&gt;</span>
             </h1>
-            <button
-              onClick={logout}
-              className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold transition-all"
-            >
-              Logout
-            </button>
+            <div className="flex items-center gap-3">
+              {sessionMasterPassword && (
+                <span className="text-sm font-semibold text-green-600 hidden sm:block">
+                  🔓 Session Active
+                </span>
+              )}
+              <button
+                onClick={handleLogout}
+                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold transition-all"
+              >
+                Logout
+              </button>
+            </div>
           </div>
 
           <p className="font-medium py-2 text-lg text-indigo-700 text-center px-2">
@@ -311,7 +351,7 @@ const Manager = () => {
             <input
               value={form.site}
               onChange={handleChange}
-              placeholder="Enter Website URL (min 3 characters)"
+              placeholder="Enter Website URL"
               className="rounded-full border border-indigo-400 w-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300"
               type="text"
               name="site"
@@ -322,7 +362,7 @@ const Manager = () => {
               <input
                 value={form.username}
                 onChange={handleChange}
-                placeholder="Enter Username (min 1 character)"
+                placeholder="Enter Username"
                 className="rounded-full border border-indigo-400 sm:w-1/2 w-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                 type="text"
                 name="username"
@@ -333,7 +373,7 @@ const Manager = () => {
                 <input
                   value={form.password}
                   onChange={handleChange}
-                  placeholder="Enter Password (min 1 character)"
+                  placeholder="Enter Password"
                   className="rounded-full border border-indigo-400 w-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                   type={showPass ? "text" : "password"}
                   name="password"
