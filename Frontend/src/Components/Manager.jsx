@@ -20,6 +20,9 @@ const Manager = () => {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   
+  // Track if we're in edit mode
+  const [editingId, setEditingId] = useState(null);
+  
   // Session-based master password (stored in memory only)
   const [sessionMasterPassword, setSessionMasterPassword] = useState("");
   const [tempMasterPassword, setTempMasterPassword] = useState("");
@@ -129,19 +132,39 @@ const Manager = () => {
     }
 
     requestMasterPassword(async (masterPass) => {
-      const response = await axios.post("/api/passwords", {
-        site: form.site,
-        username: form.username,
-        password: form.password,
-        masterPassword: masterPass,
-      });
+      if (editingId) {
+        // UPDATE existing password
+        await axios.put(`/api/passwords/${editingId}`, {
+          site: form.site,
+          username: form.username,
+          password: form.password,
+          masterPassword: masterPass,
+        });
 
-      toast.success("Password Saved!", {
-        position: "top-right",
-        autoClose: 3000,
-        theme: "dark",
-        transition: Bounce,
-      });
+        toast.success("Password Updated!", {
+          position: "top-right",
+          autoClose: 3000,
+          theme: "dark",
+          transition: Bounce,
+        });
+        
+        setEditingId(null);
+      } else {
+        // CREATE new password
+        await axios.post("/api/passwords", {
+          site: form.site,
+          username: form.username,
+          password: form.password,
+          masterPassword: masterPass,
+        });
+
+        toast.success("Password Saved!", {
+          position: "top-right",
+          autoClose: 3000,
+          theme: "dark",
+          transition: Bounce,
+        });
+      }
 
       setform({ site: "", username: "", password: "" });
       await fetchPasswords();
@@ -163,7 +186,8 @@ const Manager = () => {
         password: decryptResponse.data.password,
       });
 
-      setPasswordArray(passwordArray.filter((item) => item.id !== id));
+      // Set editing mode
+      setEditingId(id);
 
       toast.info("Edit mode: Update and save", {
         position: "top-right",
@@ -171,6 +195,17 @@ const Manager = () => {
         theme: "dark",
         transition: Bounce,
       });
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setform({ site: "", username: "", password: "" });
+    toast.info("Edit cancelled", {
+      position: "top-right",
+      autoClose: 2000,
+      theme: "dark",
+      transition: Bounce,
     });
   };
 
@@ -347,6 +382,25 @@ const Manager = () => {
             </div>
           )}
 
+          {/* Edit Mode Banner */}
+          {editingId && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <span className="text-yellow-700 font-semibold">
+                    ✏️ Edit Mode: Update the fields below and click "Update Password"
+                  </span>
+                </div>
+                <button
+                  onClick={cancelEdit}
+                  className="text-yellow-700 hover:text-yellow-900 font-semibold"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col p-4 text-black gap-6 items-stretch w-full">
             <input
               value={form.site}
@@ -394,14 +448,27 @@ const Manager = () => {
               </div>
             </div>
 
-            <button
-              onClick={savePassword}
-              disabled={loading}
-              className="cursor-pointer flex justify-center items-center gap-2 text-lg font-semibold bg-indigo-500 hover:bg-indigo-400
-                       transition-all duration-300 rounded-full px-6 py-2 w-full sm:w-fit border border-black disabled:opacity-50"
-            >
-              <span>Add Password</span>
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={savePassword}
+                disabled={loading}
+                className={`cursor-pointer flex justify-center items-center gap-2 text-lg font-semibold ${
+                  editingId ? 'bg-yellow-500 hover:bg-yellow-400' : 'bg-indigo-500 hover:bg-indigo-400'
+                } transition-all duration-300 rounded-full px-6 py-2 w-full sm:w-fit border border-black disabled:opacity-50`}
+              >
+                <span>{editingId ? "Update Password" : "Add Password"}</span>
+              </button>
+              
+              {editingId && (
+                <button
+                  onClick={cancelEdit}
+                  className="cursor-pointer flex justify-center items-center gap-2 text-lg font-semibold bg-gray-400 hover:bg-gray-500
+                           transition-all duration-300 rounded-full px-6 py-2 w-full sm:w-fit border border-black"
+                >
+                  <span>Cancel</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="passwords mt-8">
@@ -426,7 +493,7 @@ const Manager = () => {
                   </thead>
                   <tbody className="text-center bg-indigo-50 border border-white">
                     {passwordArray.map((item, index) => (
-                      <tr key={item.id}>
+                      <tr key={item.id} className={editingId === item.id ? 'bg-yellow-100' : ''}>
                         <td className="py-2 px-1 border border-white text-xs sm:text-sm">
                           <div className="relative flex items-center justify-center group">
                             <a
