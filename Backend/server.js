@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-// const mongoSanitize = require('express-mongo-sanitize'); // REMOVE THIS
 const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 require('dotenv').config();
@@ -23,9 +22,16 @@ const app = express();
 // Connect to DB
 connectDB();
 
-// CORS - MUST BE BEFORE OTHER MIDDLEWARE
+// --- FIXED CORS CONFIGURATION ---
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    // This reads the CLIENT_URL variable you set in Railway
+    // Make sure your Railway variable does NOT have a trailing slash (e.g., https://myapp.railway.app)
+    process.env.CLIENT_URL 
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -38,7 +44,6 @@ app.use(cors({
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-// app.use(mongoSanitize()); // REMOVE THIS LINE
 
 // Body + Cookies
 app.use(express.json({ limit: '10mb' }));
@@ -52,6 +57,11 @@ if (process.env.NODE_ENV === 'development') {
 
 // Global Rate Limiter (comment out if causing issues during development)
 // app.use(generalLimiter);
+
+// --- NEW: Root Route (Fixes "Route not found" confusion on homepage) ---
+app.get('/', (req, res) => {
+  res.status(200).send('API is Running Successfully. Access endpoints at /api/auth or /api/passwords');
+});
 
 // Health Check
 app.get('/health', (req, res) => {
